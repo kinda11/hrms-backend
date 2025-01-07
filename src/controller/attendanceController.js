@@ -11,6 +11,7 @@ const formatTime = (workingMinutes) => {
   // Return formatted time as "Xh Ym"
   return `${hours}h ${minutes}m`;
 };
+
 const markAttendance = async (req, res) => {
   try {
     const employeeId = req.user.id;
@@ -346,10 +347,12 @@ const getAllAttendance = async (req, res) => {
 const getMyAttendance = async (req, res) => {
   try {
     const employeeId = req.user.id; // Assuming `req.user` has authenticated user's data
-    const attendance = await Attendance.find({ employeeId }).populate(
-      "employeeId",
-      "employeeId firstName"
-    );
+    
+    // Fetch attendance records sorted by date in descending order
+    const attendance = await Attendance.find({ employeeId })
+      .populate("employeeId", "employeeId firstName")
+      .sort({ date: -1 }); // Sort by date in descending order (-1 for descending)
+
     res.status(200).json(attendance);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -475,27 +478,161 @@ const deleteAttendance = async (req, res) => {
 //         res.status(500).json({ error: err.message });
 //     }
 // };
+// ========================
+// const getAttendanceForCalendar = async (req, res) => {
+//   try {
+//     const employeeId = req.user.id; // Authenticated employee's ID
+
+//     // Get the current date and calculate the start and end of the month
+//     const now = new Date();
+//     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+//     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+//     // Fetch attendance records for the entire month
+//     const attendanceRecords = await Attendance.find({
+//       employeeId,
+//       date: { $gte: startOfMonth, $lte: endOfMonth },
+//     });
+
+//     // Fetch approved leave records for the entire month
+//     const leaveRecords = await Leave.find({
+//       employeeId,
+//       status: "approved",
+//       $or: [
+//         { startDate: { $lte: endOfMonth }, endDate: { $gte: startOfMonth } }, // Leave spans the month
+//       ],
+//     });
+
+//     const events = [];
+
+//     // Create a map of attendance records for quick lookup
+//     const attendanceMap = attendanceRecords.reduce((map, record) => {
+//       map[record.date.toISOString().split("T")[0]] = record;
+//       return map;
+//     }, {});
+
+//     // Process leave records
+//     leaveRecords.forEach((leave) => {
+//       let currentDate = new Date(
+//         leave.startDate > startOfMonth ? leave.startDate : startOfMonth
+//       );
+//       const leaveEndDate =
+//         leave.endDate < endOfMonth ? leave.endDate : endOfMonth;
+
+//       while (currentDate <= leaveEndDate) {
+//         const dateKey = currentDate.toISOString().split("T")[0];
+//         if (!attendanceMap[dateKey]) {
+//           events.push({
+//             title: "ON LEAVE",
+//             date: dateKey,
+//             backgroundColor: "#f44336", // Red for "on-leave"
+//             borderColor: "transparent",
+//             textColor: "white",
+//           });
+//         }
+//         currentDate.setDate(currentDate.getDate() + 1);
+//       }
+//     });
+
+//     // Process attendance records
+//     attendanceRecords.forEach((record) => {
+//       let backgroundColor = "#4caf50"; // Default: Green for "present"
+//       if (record.status === "late") {
+//         backgroundColor = "#ff9800"; // Orange for "late"
+//       } else if (record.status === "weekly-off") {
+//         backgroundColor = "#9e9e9e"; // Grey for "weekly-off"
+//       } else if (record.status === "absent") {
+//         backgroundColor = "#f44336"; // Red for "absent"
+//       } else if (record.status === "pending") {
+//         backgroundColor = "#ffeb3b"; // Yellow for "pending"
+//       }
+
+//       events.push({
+//         title: record.status.replace(/-/g, " ").toUpperCase(), // Status formatted for display
+//         date: record.date.toISOString().split("T")[0], // Format as YYYY-MM-DD
+//         backgroundColor,
+//         borderColor: "transparent",
+//         textColor: "white",
+//       });
+//     });
+
+//     // Add default weekly-offs for the entire month
+  
+//     let currentDate = new Date(startOfMonth);
+//     while (currentDate <= endOfMonth) {
+//       // Normalize the date to midnight UTC to avoid time zone issues
+//       const normalizedDate = new Date(
+//         Date.UTC(
+//           currentDate.getFullYear(),
+//           currentDate.getMonth(),
+//           currentDate.getDate()
+//         )
+//       );
+//       const day = normalizedDate.getDay(); // 0: Sunday, 6: Saturday
+//       const dateKey = normalizedDate.toISOString().split("T")[0];
+
+//       if ((day === 0 || day === 6) && !attendanceMap[dateKey]) {
+//         events.push({
+//           title: "WEEKLY OFF",
+//           date: dateKey,
+//           backgroundColor: "#9e9e9e", // Grey for weekly-off
+//           borderColor: "transparent",
+//           textColor: "white",
+//         });
+//       }
+
+//       currentDate.setDate(currentDate.getDate() + 1);
+//     }
+
+//     res.status(200).json({
+//       message: "Attendance data fetched successfully.",
+//       events,
+//     });
+//   } catch (err) {
+//     console.error("Error fetching attendance for calendar:", err);
+//     res.status(500).json({ error: err.message });
+//   }
+// };
+
+
+
+
+// ===============|| Get Employees Attendance For a Day|| ============================
 const getAttendanceForCalendar = async (req, res) => {
   try {
     const employeeId = req.user.id; // Authenticated employee's ID
 
-    // Get the current date and calculate the start and end of the month
+    // Get the current date and calculate the start and end of the current and previous month
     const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
-    // Fetch attendance records for the entire month
+    const startOfPreviousMonth = new Date(
+      now.getFullYear(),
+      now.getMonth() - 1,
+      1
+    );
+    const endOfPreviousMonth = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      0
+    );
+
+    // Fetch attendance records for the current and previous month
     const attendanceRecords = await Attendance.find({
       employeeId,
-      date: { $gte: startOfMonth, $lte: endOfMonth },
+      date: { $gte: startOfPreviousMonth, $lte: endOfCurrentMonth },
     });
 
-    // Fetch approved leave records for the entire month
+    // Fetch approved leave records for the current and previous month
     const leaveRecords = await Leave.find({
       employeeId,
       status: "approved",
       $or: [
-        { startDate: { $lte: endOfMonth }, endDate: { $gte: startOfMonth } }, // Leave spans the month
+        {
+          startDate: { $lte: endOfCurrentMonth },
+          endDate: { $gte: startOfPreviousMonth },
+        }, // Leave spans both months
       ],
     });
 
@@ -510,10 +647,10 @@ const getAttendanceForCalendar = async (req, res) => {
     // Process leave records
     leaveRecords.forEach((leave) => {
       let currentDate = new Date(
-        leave.startDate > startOfMonth ? leave.startDate : startOfMonth
+        leave.startDate > startOfPreviousMonth ? leave.startDate : startOfPreviousMonth
       );
       const leaveEndDate =
-        leave.endDate < endOfMonth ? leave.endDate : endOfMonth;
+        leave.endDate < endOfCurrentMonth ? leave.endDate : endOfCurrentMonth;
 
       while (currentDate <= leaveEndDate) {
         const dateKey = currentDate.toISOString().split("T")[0];
@@ -552,33 +689,36 @@ const getAttendanceForCalendar = async (req, res) => {
       });
     });
 
-    // Add default weekly-offs for the entire month
-    // Add default weekly-offs for the entire month
-    let currentDate = new Date(startOfMonth);
-    while (currentDate <= endOfMonth) {
-      // Normalize the date to midnight UTC to avoid time zone issues
-      const normalizedDate = new Date(
-        Date.UTC(
-          currentDate.getFullYear(),
-          currentDate.getMonth(),
-          currentDate.getDate()
-        )
-      );
-      const day = normalizedDate.getDay(); // 0: Sunday, 6: Saturday
-      const dateKey = normalizedDate.toISOString().split("T")[0];
+    // Add default weekly-offs for the previous and current month
+    const addWeeklyOffs = (start, end) => {
+      let currentDate = new Date(start);
+      while (currentDate <= end) {
+        const normalizedDate = new Date(
+          Date.UTC(
+            currentDate.getFullYear(),
+            currentDate.getMonth(),
+            currentDate.getDate()
+          )
+        );
+        const day = normalizedDate.getDay(); // 0: Sunday, 6: Saturday
+        const dateKey = normalizedDate.toISOString().split("T")[0];
 
-      if ((day === 0 || day === 6) && !attendanceMap[dateKey]) {
-        events.push({
-          title: "WEEKLY OFF",
-          date: dateKey,
-          backgroundColor: "#9e9e9e", // Grey for weekly-off
-          borderColor: "transparent",
-          textColor: "white",
-        });
+        if ((day === 0 || day === 6) && !attendanceMap[dateKey]) {
+          events.push({
+            title: "WEEKLY OFF",
+            date: dateKey,
+            backgroundColor: "#9e9e9e", // Grey for weekly-off
+            borderColor: "transparent",
+            textColor: "white",
+          });
+        }
+
+        currentDate.setDate(currentDate.getDate() + 1);
       }
+    };
 
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
+    addWeeklyOffs(startOfPreviousMonth, endOfPreviousMonth);
+    addWeeklyOffs(startOfCurrentMonth, endOfCurrentMonth);
 
     res.status(200).json({
       message: "Attendance data fetched successfully.",
@@ -590,7 +730,7 @@ const getAttendanceForCalendar = async (req, res) => {
   }
 };
 
-// ===============|| Get Employees Attendance For a Day|| ============================
+
 
 const getAllEmployeesTodayAttendance = async (req, res) => {
   try {
