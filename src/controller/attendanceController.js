@@ -113,47 +113,7 @@ const markAttendance = async (req, res) => {
 
 // ===========================|| Cron for auto Logout at 11:30PM ||==================
 
-// cron.schedule("20 10 * * *", async () => {
-//   try {
-//     const now = moment().tz("Asia/Kolkata");
-//     const currentDate = now.format("YYYY-MM-DD");
 
-//     console.log(`Running auto-logout cron job at: ${now.format("HH:mm:ss")}`);
-
-//     // Fetch all employees with a check-in record but no check-out record
-//     const attendanceRecords = await Attendance.find({
-//       date: currentDate,
-//       checkInTime: { $exists: true }, // Employee has checked in
-//       checkOutTime: { $exists: false }, // Employee has not checked out
-//     });
-
-//     for (const record of attendanceRecords) {
-//       const checkOutTime = now.toDate();
-//       const checkInTime = moment(record.checkInTime);
-
-//       // Calculate total working time in minutes
-//       const workingMinutes = moment(checkOutTime).diff(checkInTime, "minutes");
-
-//       // Update the attendance record with check-out time and total working hours
-//       await Attendance.findByIdAndUpdate(record._id, {
-//         checkOutTime,
-//         totalWorkingTime: formatTime(workingMinutes), // Format the total working time as "Xh Ym"
-//       });
-
-//       console.log(`Auto-checked out employee ID: ${record.employeeId}`);
-//     }
-
-//     if (attendanceRecords.length === 0) {
-//       console.log("No employees found for auto-logout.");
-//     } else {
-//       console.log(
-//         "Auto-logout completed successfully for all applicable employees."
-//       );
-//     }
-//   } catch (err) {
-//     console.error("Error occurred during auto-logout:", err.message);
-//   }
-// });
 cron.schedule("30 23 * * *", async () => {
   try {
     const now = moment().tz("Asia/Kolkata");
@@ -171,19 +131,6 @@ cron.schedule("30 23 * * *", async () => {
         employeeId: employee._id,
       });
 
-      // Check if the employee is on leave
-      const isOnLeave = await Leave.findOne({
-        employeeId: employee._id,
-        fromDate: { $lte: currentDate },
-        toDate: { $gte: currentDate },
-        status: "approved", // Only consider approved leaves
-      });
-
-      if (isOnLeave) {
-        console.log(`Employee ID: ${employee._id} is on leave, skipping.`);
-        continue; // Skip marking as absent or auto-logout
-      }
-
       if (attendanceRecord) {
         // Auto-checkout if the employee checked in but didn't check out
         if (attendanceRecord.checkInTime && !attendanceRecord.checkOutTime) {
@@ -193,33 +140,31 @@ cron.schedule("30 23 * * *", async () => {
           // Calculate total working time in minutes
           const workingMinutes = moment(checkOutTime).diff(checkInTime, "minutes");
 
-          // Update attendance record
+          // Update only checkOutTime and totalWorkingTime without modifying status
           await Attendance.findByIdAndUpdate(attendanceRecord._id, {
             checkOutTime,
             totalWorkingTime: formatTime(workingMinutes),
-            status: "present",
           });
 
           console.log(`Auto-checked out employee ID: ${employee._id}`);
+        } else {
+          console.log(
+            `Employee ID: ${employee._id} already checked out or has no check-in time.`
+          );
         }
       } else {
-        // If no attendance record exists, mark as absent
-        await Attendance.create({
-          employeeId: employee._id,
-          date: currentDate,
-          status: "absent",
-        });
-
-        console.log(`Employee ID: ${employee._id} marked as absent.`);
+        console.log(`No attendance record for employee ID: ${employee._id}, skipping.`);
       }
     }
 
-    console.log("Auto-logout and absent marking process completed.");
+    console.log("Auto-logout process completed.");
   } catch (err) {
     console.error("Error occurred during auto-logout:", err.message);
   }
 });
-  
+
+
+
 // Clock out Attendance
 
 const markCheckOut = async (req, res) => {
