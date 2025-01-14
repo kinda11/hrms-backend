@@ -3,6 +3,8 @@ const Leave = require("../model/Leave");
 const moment = require("moment-timezone");
 const Employee = require("../model/Employee");
 const cron = require("node-cron");
+const { getDistance } = require("geolib");
+const { getPreciseDistance } = require("geolib");
 
 const formatTime = (workingMinutes) => {
   const hours = Math.floor(workingMinutes / 60); // Get whole hours
@@ -12,15 +14,46 @@ const formatTime = (workingMinutes) => {
   return `${hours}h ${minutes}m`;
 };
 
+const OFFICE_LOCATION = {
+  latitude:25.3634177, 
+  longitude: 83.0065835, 
+};
+const ALLOWED_DISTANCE = 50; 
+
+
+
+// ======================= Attendance with location 
 const markAttendance = async (req, res) => {
   try {
     const employeeId = req.user.id;
-    const now = moment().tz("Asia/Kolkata"); // Use consistent time zone
-
-    // Format date as YYYY-MM-DD for the `date` field
+    const now = moment().tz("Asia/Kolkata");
     const currentDate = now.format("YYYY-MM-DD");
 
-    // Check if attendance already exists for the employee on the same date
+    // Extract user's location from request body
+    const { latitude, longitude } = req.body;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({ message: "Location data is required." });
+    }
+
+    // Calculate distance from the office
+    const distance = getPreciseDistance(
+      { latitude: parseFloat(latitude), longitude: parseFloat(longitude) },
+      { latitude: OFFICE_LOCATION.latitude, longitude: OFFICE_LOCATION.longitude }
+    );
+
+    console.log(`Calculated Distance: ${distance} meters`);
+
+    if (distance > ALLOWED_DISTANCE) {
+      return res.status(403).json({
+        message: "You are out of the allowed range to mark attendance.",
+        distance,
+      });
+    }
+
+    // Proceed with the rest of the attendance logic
+    // ...
+
     const existingRecord = await Attendance.findOne({
       employeeId,
       date: currentDate,
@@ -33,11 +66,9 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // Define weekly-off days (Saturday and Sunday)
-    const weeklyOffDays = [0, 6]; // Sunday (0) and Saturday (6)
+    const weeklyOffDays = [0, 6];
     const isWeeklyOff = weeklyOffDays.includes(now.day());
 
-    // Check if the employee is on leave
     const leaveRecord = await Leave.findOne({
       employeeId,
       startDate: { $lte: now.toDate() },
@@ -53,7 +84,6 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // Handle weekly-off case
     if (isWeeklyOff) {
       const attendance = new Attendance({
         employeeId,
@@ -68,15 +98,10 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // Default values for non-weekly-off days
     let status = "absent";
     let lateTimeInMinutes = 0;
+    const officialStartTime = now.clone().set({ hour: 10, minute: 0, second: 0 });
 
-    const officialStartTime = now
-      .clone()
-      .set({ hour: 10, minute: 0, second: 0 });
-
-    // Logic for determining status
     if (now.isSameOrBefore(officialStartTime)) {
       status = "present";
     } else {
@@ -84,11 +109,9 @@ const markAttendance = async (req, res) => {
       status = lateTimeInMinutes > 0 ? "late" : "present";
     }
 
-    // Format late time
     const lateTime =
       lateTimeInMinutes > 0 ? formatTime(lateTimeInMinutes) : "0h 0m";
 
-    // Create new attendance record
     const attendance = new Attendance({
       employeeId,
       date: currentDate,
@@ -105,16 +128,115 @@ const markAttendance = async (req, res) => {
     });
   } catch (err) {
     console.error(err.message);
-    res
-      .status(500)
-      .json({ error: "An error occurred while marking attendance." });
+    res.status(500).json({ error: "An error occurred while marking attendance." });
   }
 };
+
+
+
+// const markAttendance = async (req, res) => {
+//   try {
+//     const employeeId = req.user.id;
+//     const now = moment().tz("Asia/Kolkata"); // Use consistent time zone
+
+//     // Format date as YYYY-MM-DD for the `date` field
+//     const currentDate = now.format("YYYY-MM-DD");
+
+//     // Check if attendance already exists for the employee on the same date
+//     const existingRecord = await Attendance.findOne({
+//       employeeId,
+//       date: currentDate,
+//     });
+
+//     if (existingRecord) {
+//       return res.status(200).json({
+//         message: "Attendance already marked successfully for today.",
+//         attendance: existingRecord,
+//       });
+//     }
+
+//     // Define weekly-off days (Saturday and Sunday)
+//     const weeklyOffDays = [0, 6]; // Sunday (0) and Saturday (6)
+//     const isWeeklyOff = weeklyOffDays.includes(now.day());
+
+//     // Check if the employee is on leave
+//     const leaveRecord = await Leave.findOne({
+//       employeeId,
+//       startDate: { $lte: now.toDate() },
+//       endDate: { $gte: now.toDate() },
+//       status: "approved",
+//     });
+
+//     if (leaveRecord) {
+//       return res.status(200).json({
+//         message: "Employee is on leave today.",
+//         status: "on-leave",
+//         leaveRecord,
+//       });
+//     }
+
+//     // Handle weekly-off case
+//     if (isWeeklyOff) {
+//       const attendance = new Attendance({
+//         employeeId,
+//         date: currentDate,
+//         status: "weekly-off",
+//       });
+//       await attendance.save();
+
+//       return res.status(201).json({
+//         message: "Attendance marked as weekly-off for today.",
+//         attendance,
+//       });
+//     }
+
+//     // Default values for non-weekly-off days
+//     let status = "absent";
+//     let lateTimeInMinutes = 0;
+
+//     const officialStartTime = now
+//       .clone()
+//       .set({ hour: 10, minute: 0, second: 0 });
+
+//     // Logic for determining status
+//     if (now.isSameOrBefore(officialStartTime)) {
+//       status = "present";
+//     } else {
+//       lateTimeInMinutes = now.diff(officialStartTime, "minutes");
+//       status = lateTimeInMinutes > 0 ? "late" : "present";
+//     }
+
+//     // Format late time
+//     const lateTime =
+//       lateTimeInMinutes > 0 ? formatTime(lateTimeInMinutes) : "0h 0m";
+
+//     // Create new attendance record
+//     const attendance = new Attendance({
+//       employeeId,
+//       date: currentDate,
+//       checkInTime: now.toDate(),
+//       status,
+//       lateTime,
+//     });
+
+//     await attendance.save();
+
+//     res.status(201).json({
+//       message: "Attendance marked successfully.",
+//       attendance,
+//     });
+//   } catch (err) {
+//     console.error(err.message);
+//     res
+//       .status(500)
+//       .json({ error: "An error occurred while marking attendance." });
+//   }
+// };
 
 // ===========================|| Cron for auto Logout at 11:30PM ||==================
 
 
-// cron.schedule("30 23 * * *", async () => {
+// cron.schedule("09 15 * * *", async () => {
 //   try {
 //     const now = moment().tz("Asia/Kolkata");
 //     const currentDate = now.format("YYYY-MM-DD");
@@ -124,8 +246,7 @@ const markAttendance = async (req, res) => {
 //     // Fetch all employees
 //     const employees = await Employee.find({}); // Adjust query if needed to filter active employees
 
-//     for (const employee of employees) {
-//       // Check attendance record for the current employee
+//     for (const employee of employees) {         // Check attendance record for the current employee
 //       const attendanceRecord = await Attendance.findOne({
 //         date: currentDate,
 //         employeeId: employee._id,
@@ -147,7 +268,9 @@ const markAttendance = async (req, res) => {
 //           });
 
 //           console.log(`Auto-checked out employee ID: ${employee._id}`);
-//         } else {
+//         } 
+       
+//         else {
 //           console.log(
 //             `Employee ID: ${employee._id} already checked out or has no check-in time.`
 //           );
@@ -166,6 +289,11 @@ const markAttendance = async (req, res) => {
 
 
 // Clock out Attendance
+
+
+
+
+
 
 const markCheckOut = async (req, res) => {
   try {
